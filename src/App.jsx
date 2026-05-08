@@ -96,6 +96,8 @@ const initialState = {
   customAudience: "",
   gameType: "",
   features: [],
+  customFeatures: [],
+  customFeatureInput: "",
   customDescription: "",
   customAction: "",
   customElements: [],
@@ -108,6 +110,12 @@ function getAppTypeLabel(id) {
 
 function getGameLabel(id) {
   return GAMES.find((item) => item.id === id)?.title || "선택한 미니게임";
+}
+
+function getAllFeatures(state) {
+  const selected = Array.isArray(state.features) ? state.features : [];
+  const custom = Array.isArray(state.customFeatures) ? state.customFeatures : [];
+  return [...selected, ...custom];
 }
 
 function joinFeatures(list) {
@@ -196,7 +204,8 @@ function makePrompt(state) {
   const elements = getScreenElements(state);
   const lines = getFunctionLines(state);
 
-  let typeText = `앱 유형은 ${getAppTypeLabel(state.appType)}이고, 핵심 기능은 ${joinFeatures(state.features)}이야.`;
+  const allFeatures = getAllFeatures(state);
+  let typeText = `앱 유형은 ${getAppTypeLabel(state.appType)}이고, 핵심 기능은 ${joinFeatures(allFeatures)}이야.`;
 
   if (state.appType === "game") {
     typeText += `${NEW_LINE}이 앱은 ${getGameLabel(state.gameType)} 형태의 미니게임이야.`;
@@ -308,6 +317,17 @@ function runPromptGeneratorSelfTests() {
   console.assert(customPrompt.includes("오늘의 운세를 알려주는 앱"), "테스트 실패: 기타 앱 설명이 포함되어야 함");
   console.assert(customPrompt.includes("랜덤 결과"), "테스트 실패: 결과 방식이 포함되어야 함");
   console.assert(typeof copyTextFallback === "function", "테스트 실패: 복사 fallback 함수가 있어야 함");
+
+  const customFeaturePrompt = makePrompt({
+    ...initialState,
+    appType: "checklist",
+    mood: "깔끔한",
+    topic: "공부 계획 체크",
+    audience: "나",
+    features: ["할 일 입력하기"],
+    customFeatures: ["중요도 표시하기"],
+  });
+  console.assert(customFeaturePrompt.includes("중요도 표시하기"), "테스트 실패: 직접 입력한 핵심 기능이 포함되어야 함");
 }
 
 if (typeof window !== "undefined") {
@@ -338,7 +358,7 @@ export default function App() {
     if (form.audience && (form.audience !== "직접 입력" || form.customAudience.trim())) score += 1;
     if (form.appType === "custom") {
       if (form.customDescription && form.customAction && form.resultType) score += 1;
-    } else if (form.features.length >= 2) {
+    } else if (getAllFeatures(form).length >= 2) {
       score += 1;
     }
     return score;
@@ -356,6 +376,29 @@ export default function App() {
     });
   }
 
+  function addCustomFeature() {
+    const value = form.customFeatureInput.trim();
+    if (!value) return;
+    setForm((prev) => {
+      const current = Array.isArray(prev.customFeatures) ? prev.customFeatures : [];
+      if (current.includes(value)) {
+        return { ...prev, customFeatureInput: "" };
+      }
+      return {
+        ...prev,
+        customFeatures: [...current, value],
+        customFeatureInput: "",
+      };
+    });
+  }
+
+  function removeCustomFeature(value) {
+    setForm((prev) => ({
+      ...prev,
+      customFeatures: prev.customFeatures.filter((item) => item !== value),
+    }));
+  }
+
   function validate() {
     if (step === 1 && !form.appType) return "앱 유형을 선택해 주세요.";
     if (step === 2 && !form.mood) return "앱 분위기를 선택해 주세요.";
@@ -365,7 +408,7 @@ export default function App() {
       if (form.audience === "직접 입력" && !form.customAudience.trim()) return "사용 대상을 입력해 주세요.";
     }
     if (step === 5 && !form.gameType) return "게임 종류를 선택해 주세요.";
-    if (step === 6 && form.features.length < 2) return "핵심 기능을 2개 이상 선택해 주세요.";
+    if (step === 6 && getAllFeatures(form).length < 2) return "핵심 기능을 2개 이상 선택하거나 직접 입력해 주세요.";
     if (step === 7) {
       if (!form.customDescription.trim()) return "만들고 싶은 앱을 설명해 주세요.";
       if (!form.customAction.trim()) return "앱이 해줬으면 하는 일을 입력해 주세요.";
@@ -460,7 +503,7 @@ export default function App() {
                   <Choice
                     key={item.id}
                     selected={form.appType === item.id}
-                    onClick={() => setForm((prev) => ({ ...prev, appType: item.id, features: [], gameType: "" }))}
+                    onClick={() => setForm((prev) => ({ ...prev, appType: item.id, features: [], customFeatures: [], customFeatureInput: "", gameType: "" }))}
                     icon={item.icon}
                     title={item.title}
                     desc={item.desc}
@@ -532,7 +575,33 @@ export default function App() {
                   <Check key={feature} checked={form.features.includes(feature)} onChange={() => toggleArray("features", feature)} label={feature} />
                 ))}
               </div>
-              <p className="hint">선택한 기능: {form.features.length ? form.features.join(" · ") : "아직 없음"}</p>
+              <div className="customFeatureBox">
+                <label>직접 추가할 핵심 기능</label>
+                <div className="customFeatureInputRow">
+                  <input
+                    value={form.customFeatureInput}
+                    onChange={(e) => update("customFeatureInput", e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addCustomFeature();
+                      }
+                    }}
+                    placeholder="예: 난이도 선택하기, 힌트 보여주기, 중요도 표시하기"
+                  />
+                  <button type="button" className="primary" onClick={addCustomFeature}>추가</button>
+                </div>
+                {form.customFeatures.length > 0 && (
+                  <div className="customFeatureList">
+                    {form.customFeatures.map((feature) => (
+                      <button key={feature} type="button" onClick={() => removeCustomFeature(feature)}>
+                        {feature} ×
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <p className="hint">선택한 기능: {getAllFeatures(form).length ? getAllFeatures(form).join(" · ") : "아직 없음"}</p>
               <Nav onPrev={prev} onNext={next} error={error} />
             </Section>
           )}
@@ -584,7 +653,7 @@ export default function App() {
                   <Summary label="앱 주제" value={form.topic || form.customDescription || "-"} />
                   <Summary label="사용 대상" value={form.audience === "직접 입력" ? form.customAudience : form.audience || "-"} />
                   {form.appType === "game" && <Summary label="게임 종류" value={getGameLabel(form.gameType)} />}
-                  {form.appType === "custom" ? <Summary label="직접 설명" value={form.customDescription || "-"} /> : <Summary label="핵심 기능" value={form.features.length ? form.features.join(" · ") : "-"} />}
+                  {form.appType === "custom" ? <Summary label="직접 설명" value={form.customDescription || "-"} /> : <Summary label="핵심 기능" value={getAllFeatures(form).length ? getAllFeatures(form).join(" · ") : "-"} />}
                   <p className="feedback">{completion >= 5 ? "좋아요! 바로 Gemini Canvas에 넣어도 충분히 구체적입니다." : "조금만 더 구체적으로 다듬으면 더 좋은 앱이 나올 수 있습니다."}</p>
                 </div>
                 <div className="promptBox">
@@ -718,6 +787,12 @@ input:focus, textarea:focus { border-color: #7c8cff; box-shadow: 0 0 0 4px rgba(
 .check { display: flex; gap: 10px; align-items: center; border: 2px solid #eef1f7; background: white; border-radius: 18px; padding: 15px; font-weight: 900; cursor: pointer; }
 .check input { width: 20px; height: 20px; accent-color: #7c8cff; }
 .hint, .feedback { margin-top: 16px; padding: 14px 16px; border-radius: 18px; background: #f6f8fc; color: #68738a; font-weight: 800; line-height: 1.5; }
+.customFeatureBox { margin-top: 18px; padding: 18px; border: 1px solid #eef1f7; border-radius: 22px; background: #fff; box-shadow: 0 10px 22px rgba(31,42,68,.06); }
+.customFeatureBox label { display: block; margin-bottom: 10px; font-size: 18px; font-weight: 900; }
+.customFeatureInputRow { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+.customFeatureList { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.customFeatureList button { border: 2px solid #dfe4ef; background: #f3f5ff; color: #1f2a44; border-radius: 999px; padding: 10px 14px; font-weight: 900; cursor: pointer; }
+.customFeatureList button:hover { border-color: #7c8cff; }
 .error { margin-top: 16px; padding: 14px 16px; border-radius: 18px; background: #fff0f2; color: #d13b54; font-weight: 900; }
 .nav { margin-top: 28px; display: flex; justify-content: space-between; gap: 12px; }
 .twoCol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -742,6 +817,7 @@ textarea { width: 100%; height: 520px; resize: vertical; border: 2px solid #dfe4
 @media (max-width: 900px) {
   .topbar, .hero, .twoCol, .resultGrid, .resultHero { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; }
   .cards.three, .cards.four, .checks, .fourChecks { grid-template-columns: 1fr; }
+  .customFeatureInputRow { grid-template-columns: 1fr; }
   .heroText { padding: 30px; }
   .content { padding: 20px; }
   .resultHero { display: block; }
